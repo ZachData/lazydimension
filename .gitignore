@@ -2,3 +2,8 @@
 !*.py
 !*.md
 !.gitignore
+!results/
+!gradientflow/
+!exp/
+!dataset/
+!arch
