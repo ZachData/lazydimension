@@ -26,7 +26,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent))
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from _common import BASE_ARGS, DEVICE, extract_last_metrics, run_items
+from _common import BASE_ARGS, DEFAULT_DEVICE, extract_last_metrics, run_items
 from datasets import DATASETS, dataset_args
 
 # Phase A: dense seed sampling at the transition
@@ -48,10 +48,10 @@ def run_one(item):
     phase   = item['phase']
     dataset = item['dataset']
     h, alpha, seed = item['h'], item['alpha'], item['seed']
-    print(f"    [{phase}] {dataset} h={h} alpha={alpha:.2e} seed={seed}  [{DEVICE}]")
+    print(f"    [{phase}] {dataset} h={h} alpha={alpha:.2e} seed={seed}  [{item['device']}]")
     args = dataset_args(dataset, {
         **BASE_ARGS, 'h': h, 'alpha': alpha,
-        'seed_init': seed, 'device': DEVICE,
+        'seed_init': seed, 'device': item['device'],
     })
     run = None
     for run in execute(args):
@@ -71,6 +71,8 @@ def main():
     ap.add_argument('--phase',   default='both',
                     choices=['A', 'B', 'both'])
     ap.add_argument('--workers', type=int, default=1)
+    ap.add_argument('--device',  default=DEFAULT_DEVICE,
+                    help='cpu or cuda (default: cpu; fp64 on consumer Nvidia is slower)')
     args = ap.parse_args()
 
     out_dir = Path(__file__).parent / 'runs' / 'exp_seeds'
@@ -88,7 +90,8 @@ def main():
                 key = f"A_{ds['name']}_h{PHASE_A_H}_alpha{PHASE_A_ALPHA:.2e}_seed{seed}.json"
                 if not (out_dir / key).exists():
                     todo.append({'phase': 'A', 'dataset': ds['name'],
-                                 'h': PHASE_A_H, 'alpha': PHASE_A_ALPHA, 'seed': seed})
+                                 'h': PHASE_A_H, 'alpha': PHASE_A_ALPHA, 'seed': seed,
+                                 'device': item['device']})
 
     if args.phase in ('B', 'both'):
         for ds in active:
@@ -98,14 +101,15 @@ def main():
                         key = f"B_{ds['name']}_h{h}_alpha{alpha:.2e}_seed{seed}.json"
                         if not (out_dir / key).exists():
                             todo.append({'phase': 'B', 'dataset': ds['name'],
-                                         'h': h, 'alpha': alpha, 'seed': seed})
+                                         'h': h, 'alpha': alpha, 'seed': seed,
+                                         'device': item['device']})
 
     nA = len(active) * len(PHASE_A_SEEDS)
     nB = len(active) * len(H_VALUES) * len(ALPHA_VALUES) * len(PHASE_B_SEEDS)
     print('=' * 60)
     print(f"exp_seeds | dataset(s): {[d['name'] for d in active]}")
     print(f"Phase A: {nA} total | Phase B: {nB} total | to run: {len(todo)}")
-    print(f"device: {DEVICE} | workers: {args.workers}")
+    print(f"device: {args.device} | workers: {args.workers}")
     print('=' * 60)
 
     if not todo:

@@ -1,18 +1,15 @@
 #!/usr/bin/env python3
 """
 EXPERIMENT: exp_h_range
-Expanded width sweep h ∈ [10, 30, 100, 300, 1000, 3000, 10000].
+h ∈ [10, 30, 100, 300, 1000, 3000, 10000], 25 alpha, 3 seeds.
 
-Baseline only tested h ∈ {100, 300, 1000} — one order of magnitude.
-With three orders of magnitude the exponent β can be fitted precisely
-enough to distinguish β = -0.5 from β = -0.4 or -0.6.
+Recommended: workers=10, device=cpu (RTX 3080 fp64 is slower than 10 CPU cores).
+~0.7h wall-clock at workers=10.
 
 Usage
 -----
-    python experiments/exp_h_range_run.py
-    python experiments/exp_h_range_run.py --dataset mnist
-    python experiments/exp_h_range_run.py --dataset all
-    python experiments/exp_h_range_run.py --workers 4
+    python experiments/exp_h_range_run.py --workers 10
+    python experiments/exp_h_range_run.py --workers 10 --dataset all
 """
 
 import argparse
@@ -25,7 +22,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent))
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from _common import BASE_ARGS, DEVICE, extract_last_metrics, run_items
+from _common import BASE_ARGS, DEFAULT_DEVICE, extract_last_metrics, run_items
 from datasets import DATASETS, dataset_args
 
 H_VALUES = [10, 30, 100, 300, 1000, 3000, 10000]
@@ -39,11 +36,12 @@ SEEDS = [0, 1, 2]
 
 def run_one(item):
     from main import execute
+    device = item['device']
     dataset, h, alpha, seed = item['dataset'], item['h'], item['alpha'], item['seed']
-    print(f"    {dataset} h={h} alpha={alpha:.2e} seed={seed}  [{DEVICE}]")
+    print(f"    {dataset} h={h} alpha={alpha:.2e} seed={seed}  [{device}]")
     args = dataset_args(dataset, {
         **BASE_ARGS, 'h': h, 'alpha': alpha,
-        'seed_init': seed, 'device': DEVICE,
+        'seed_init': seed, 'device': device,
     })
     run = None
     for run in execute(args):
@@ -61,10 +59,11 @@ def run_one(item):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument('--dataset', default='fashion',
-                    help="Dataset name, or 'all' for every supported dataset")
-    ap.add_argument('--workers', type=int, default=1,
-                    help='Parallel worker processes (1 = sequential)')
+    ap.add_argument('--dataset', default='fashion')
+    ap.add_argument('--workers', type=int, default=1)
+    ap.add_argument('--device',  default=DEFAULT_DEVICE,
+                    help=f'cpu or cuda (default: {DEFAULT_DEVICE}; '
+                         f'fp64 on consumer Nvidia is slower than CPU)')
     args = ap.parse_args()
 
     out_dir = Path(__file__).parent / 'runs' / 'exp_h_range'
@@ -73,11 +72,9 @@ def main():
     active = DATASETS if args.dataset == 'all' \
              else [d for d in DATASETS if d['name'] == args.dataset]
     if not active:
-        raise ValueError(f"Unknown dataset '{args.dataset}'. "
-                         f"Options: {[d['name'] for d in DATASETS]} or 'all'")
+        raise ValueError(f"Unknown dataset '{args.dataset}'.")
 
-    todo = []
-    skipped = 0
+    todo, skipped = [], 0
     for ds in active:
         for h in H_VALUES:
             for alpha in ALPHA_VALUES:
@@ -86,21 +83,20 @@ def main():
                     f = out_dir / key
                     if f.exists():
                         try:
-                            m = json.load(open(f))
-                            if m.get('converged_loose') is not None:
-                                skipped += 1
-                                continue
+                            if json.load(open(f)).get('converged_loose') is not None:
+                                skipped += 1; continue
                         except Exception:
                             f.unlink()
                     todo.append({'dataset': ds['name'], 'h': h,
-                                 'alpha': alpha, 'seed': seed})
+                                 'alpha': alpha, 'seed': seed,
+                                 'device': args.device})
 
     total = len(active) * len(H_VALUES) * len(ALPHA_VALUES) * len(SEEDS)
     print('=' * 60)
     print(f"exp_h_range | dataset(s): {[d['name'] for d in active]}")
-    print(f"h values: {H_VALUES}")
-    print(f"device: {DEVICE} | workers: {args.workers}")
-    print(f"Total: {total} | already done: {skipped} | to run: {len(todo)}")
+    print(f"h: {H_VALUES}")
+    print(f"device: {args.device} | workers: {args.workers}")
+    print(f"total: {total} | done: {skipped} | to run: {len(todo)}")
     print('=' * 60)
 
     if not todo:

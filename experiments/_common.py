@@ -3,27 +3,31 @@ _common.py — Shared helpers for all experiment run scripts.
 
 Provides:
   BASE_ARGS     — default training arguments matching the paper's baseline
-  DEVICE        — 'cuda' if available, else 'cpu'
-  run_items()   — local parallel/sequential runner replacing Modal's .map()
+  DEFAULT_DEVICE — 'cpu' by default (see note below)
+  run_items()   — local parallel/sequential runner
   project_root  — Path to the codebase root (parent of experiments/)
+
+Device note
+-----------
+These experiments use float64 throughout. Consumer Nvidia GPUs (including
+the RTX 3080) throttle fp64 to 1/32 of fp32 throughput (~0.3 TFLOPS),
+which is slower than 10 CPU cores for the small FC networks used here.
+Default is therefore 'cpu'. Pass --device cuda only if you have a
+data-centre GPU (A100, H100) where fp64 is not throttled.
 """
 
-import math
 import multiprocessing
 import sys
 import traceback
 from pathlib import Path
 
-import torch
-
 # ── Project root ──────────────────────────────────────────────────────────────
-# experiments/ sits directly inside the project root
 project_root = Path(__file__).parent.parent
 if str(project_root) not in sys.path:
     sys.path.insert(0, str(project_root))
 
-# ── Device ────────────────────────────────────────────────────────────────────
-DEVICE = 'cuda' if torch.cuda.is_available() else 'cpu'
+# ── Device default ────────────────────────────────────────────────────────────
+DEFAULT_DEVICE = 'cpu'
 
 # ── Baseline training arguments ───────────────────────────────────────────────
 BASE_ARGS = {
@@ -56,30 +60,22 @@ BASE_ARGS = {
 
 # ── Local runner ──────────────────────────────────────────────────────────────
 
-def _worker(args):
-    """Top-level function for multiprocessing (must be picklable)."""
+def _worker_fn(args):
     fn, item = args
     try:
-        return fn(item)
+        return item, fn(item)
     except Exception:
         traceback.print_exc()
-        return None
+        return item, None
 
 
 def run_items(fn, items, workers=1, desc=''):
     """
-    Run fn(item) for each item, optionally in parallel.
+    Run fn(item) for each item in items, optionally in parallel.
 
-    Parameters
-    ----------
-    fn      : callable(item) -> result
-    items   : list of items
-    workers : number of parallel processes (1 = sequential)
-    desc    : label for progress output
-
-    Yields
-    ------
-    (item, result) pairs in completion order.
+    Yields (item, result) pairs as they complete.
+    workers=1  → sequential (safe for debugging)
+    workers>1  → multiprocessing.Pool with spawn context
     """
     if not items:
         return
@@ -98,29 +94,20 @@ def run_items(fn, items, workers=1, desc=''):
             yield item, result
     else:
         ctx = multiprocessing.get_context('spawn')
+        pairs = [(fn, item) for item in items]
+        completed = 0
         with ctx.Pool(workers) as pool:
-            pairs = [(fn, item) for item in items]
-            for i, result in enumerate(pool.imap_unordered(_worker, pairs), 1):
-                print(f'  {label}{i}/{total}', flush=True)
-                # result here is the return value of _worker(fn, item)
-                # We don't have item back from imap_unordered easily,
-                # so use a wrapper approach below
-            # Re-do with starmap to keep item association
-        # Use pool.starmap for ordered results with item tracking
-        with ctx.Pool(workers) as pool:
-            results = pool.starmap(_worker, pairs)
-        for item, result in zip(items, results):
-            yield item, result
+            for item, result in pool.imap_unordered(_worker_fn, pairs):
+                completed += 1
+                print(f'  {label}{completed}/{total}', flush=True)
+                yield item, result
 
 
 def extract_last_metrics(run, **extra):
     """Extract final-step metrics from a completed run dict."""
-    if not run or 'regular' not in run or 'dynamics' not in run['regular']:
+    if not run or 'regular' not in run or not run['regular'].get('dynamics'):
         return None
-    dynamics = run['regular']['dynamics']
-    if not dynamics:
-        return None
-    f = dynamics[-1]
+    f = run['regular']['dynamics'][-1]
     return {
         'final_test_err':  f['test']['err'],
         'final_train_err': f['train']['err'],

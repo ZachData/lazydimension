@@ -22,7 +22,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent))
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from _common import BASE_ARGS, DEVICE, extract_last_metrics, run_items
+from _common import BASE_ARGS, DEFAULT_DEVICE, extract_last_metrics, run_items
 from datasets import DATASETS, dataset_args
 
 # Pairs near the transition where timeouts are most likely
@@ -42,11 +42,11 @@ EXTENDED_WALL = 3600
 def run_one(item):
     from main import execute
     dataset, h, alpha, seed = item['dataset'], item['h'], item['alpha'], item['seed']
-    print(f"    {dataset} h={h} alpha={alpha:.2e} seed={seed}  [{DEVICE}] wall={EXTENDED_WALL}s")
+    print(f"    {dataset} h={h} alpha={alpha:.2e} seed={seed}  [{item['device']}] wall={EXTENDED_WALL}s")
     args = dataset_args(dataset, {
         **BASE_ARGS,
         'h': h, 'alpha': alpha, 'seed_init': seed,
-        'device': DEVICE,
+        'device': item['device'],
         'max_wall': EXTENDED_WALL,
     })
     run = None
@@ -68,6 +68,8 @@ def main():
     ap.add_argument('--dataset', default='fashion',
                     help="Dataset name, or 'all'")
     ap.add_argument('--workers', type=int, default=1)
+    ap.add_argument('--device',  default=DEFAULT_DEVICE,
+                    help='cpu or cuda (default: cpu; fp64 on consumer Nvidia is slower)')
     args = ap.parse_args()
 
     out_dir = Path(__file__).parent / 'runs' / 'exp_wall_time'
@@ -85,14 +87,15 @@ def main():
                 key = f"{ds['name']}_h{h}_alpha{alpha:.2e}_seed{seed}.json"
                 if not (out_dir / key).exists():
                     todo.append({'dataset': ds['name'],
-                                 'h': h, 'alpha': alpha, 'seed': seed})
+                                 'h': h, 'alpha': alpha, 'seed': seed,
+                                 'device': item['device']})
 
     total = len(active) * len(SENSITIVE_PAIRS) * len(SEEDS)
     print('=' * 60)
     print(f"exp_wall_time | dataset(s): {[d['name'] for d in active]}")
     print(f"{len(SENSITIVE_PAIRS)} sensitive pairs x {len(SEEDS)} seeds = {total} total")
     print(f"max_wall: {EXTENDED_WALL}s  (baseline: 600s)")
-    print(f"device: {DEVICE} | workers: {args.workers}")
+    print(f"device: {args.device} | workers: {args.workers}")
     print(f"to run: {len(todo)}")
     print('=' * 60)
 

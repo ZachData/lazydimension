@@ -22,7 +22,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent))
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from _common import BASE_ARGS, DEVICE, extract_last_metrics, run_items
+from _common import BASE_ARGS, DEFAULT_DEVICE, extract_last_metrics, run_items
 from datasets import DATASETS, dataset_args
 
 L_VALUES     = [1, 2, 3, 4, 6]
@@ -38,11 +38,11 @@ def run_one(item):
     from main import execute
     L, dataset, h, alpha, seed = (item['L'], item['dataset'],
                                    item['h'], item['alpha'], item['seed'])
-    print(f"    L={L} {dataset} h={h} alpha={alpha:.2e} seed={seed}  [{DEVICE}]")
+    print(f"    L={L} {dataset} h={h} alpha={alpha:.2e} seed={seed}  [{item['device']}]")
     args = dataset_args(dataset, {
         **BASE_ARGS, 'L': L,
         'h': h, 'alpha': alpha,
-        'seed_init': seed, 'device': DEVICE,
+        'seed_init': seed, 'device': item['device'],
     })
     run = None
     for run in execute(args):
@@ -60,6 +60,8 @@ def main():
     ap.add_argument('--dataset', default='fashion',
                     help="Dataset name, or 'all'")
     ap.add_argument('--workers', type=int, default=1)
+    ap.add_argument('--device',  default=DEFAULT_DEVICE,
+                    help='cpu or cuda (default: cpu; fp64 on consumer Nvidia is slower)')
     args = ap.parse_args()
 
     out_dir = Path(__file__).parent / 'runs' / 'exp_depth'
@@ -88,13 +90,14 @@ def main():
                             except Exception:
                                 f.unlink()
                         todo.append({'L': L, 'dataset': ds['name'],
-                                     'h': h, 'alpha': alpha, 'seed': seed})
+                                     'h': h, 'alpha': alpha, 'seed': seed,
+                                     'device': item['device']})
 
     total = len(L_VALUES) * len(active) * len(H_VALUES) * len(ALPHA_VALUES) * len(SEEDS)
     print('=' * 60)
     print(f"exp_depth | dataset(s): {[d['name'] for d in active]}")
     print(f"L values: {L_VALUES}  (L=3 is baseline depth)")
-    print(f"device: {DEVICE} | workers: {args.workers}")
+    print(f"device: {args.device} | workers: {args.workers}")
     print(f"Total: {total} | done: {skipped} | to run: {len(todo)}")
     print('=' * 60)
 

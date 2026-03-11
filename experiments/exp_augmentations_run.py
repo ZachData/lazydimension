@@ -23,7 +23,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent))
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from _common import BASE_ARGS, DEVICE, run_items
+from _common import BASE_ARGS, DEFAULT_DEVICE, run_items
 from datasets import DATASETS, dataset_args
 from splits import SPLITS_BY_DATASET, SANITY_CHECK_SPLIT
 from augmentations import augmentations_for, get_augmentation_fn
@@ -37,7 +37,17 @@ SEEDS = [0, 1, 2]
 
 
 def run_one(item):
-    import __init__ as dataset_module
+    # __init__.py in the project root is not importable by name.
+    # Load it by file path and register under a stable name so workers can find it.
+    import importlib.util as _ilu, sys as _sys
+    _mod_name = '_project_dataset'
+    if _mod_name not in _sys.modules:
+        _spec = _ilu.spec_from_file_location(
+            _mod_name, Path(__file__).parent.parent / '__init__.py')
+        _mod = _ilu.module_from_spec(_spec)
+        _sys.modules[_mod_name] = _mod
+        _spec.loader.exec_module(_mod)
+    dataset_module = _sys.modules[_mod_name]
     import torchvision
     import torch
     import torch.nn.functional as F
@@ -50,7 +60,7 @@ def run_one(item):
     dataset    = item['dataset']
     h, alpha, seed = item['h'], item['alpha'], item['seed']
 
-    print(f"    {dataset}/{aug_name}/{split_name} h={h} alpha={alpha:.2e} seed={seed}  [{DEVICE}]")
+    print(f"    {dataset}/{aug_name}/{split_name} h={h} alpha={alpha:.2e} seed={seed}  [{item['device']}]")
 
     # ── Inline augmentation functions ────────────────────────────────────────
     def _identity(x): return x
@@ -206,7 +216,7 @@ def run_one(item):
 
         args = dataset_args(dataset, {
             **BASE_ARGS, 'h': h, 'alpha': alpha,
-            'seed_init': seed, 'device': DEVICE,
+            'seed_init': seed, 'device': item['device'],
         })
         run = None
         for run in execute(args):
@@ -280,13 +290,14 @@ def main():
                                     'aug': aug_name, 'split': split_name,
                                     'dataset': ds_name, 'split_map': int_map,
                                     'h': h, 'alpha': alpha, 'seed': seed,
+                                    'device': args.device,
                                 })
 
     print('=' * 60)
     print(f"exp_augmentations | dataset(s): {[d['name'] for d in active]}")
     print(f"aug filter:   {args.aug_filter or 'all'}")
     print(f"split filter: {args.split_filter or 'all'}")
-    print(f"device: {DEVICE} | workers: {args.workers} | to run: {len(todo)}")
+    print(f"device: {args.device} | workers: {args.workers} | to run: {len(todo)}")
     print(f"'identity' x '{SANITY_CHECK_SPLIT}' = double sanity check")
     print('=' * 60)
 
