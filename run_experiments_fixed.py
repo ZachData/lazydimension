@@ -125,10 +125,13 @@ EXPERIMENT_ARGS_TEMPLATE = {
 }
 
 H_VALUES = [100, 300, 1000]
+# Reduced from 25 to 11 values: 1 per decade, trimmed extremes.
+# Covers the full transition region and all Table 1 alpha_code values
+# (1e-3, 1e-1, 1e1, 1e3, 1e5). Original had 2 per decade (1x and 3x)
+# plus tails at 1e-5 and 1e7 deep inside each regime.
+# 99 experiments instead of 225; ~16 GPU-hours worst case instead of ~38.
 ALPHA_VALUES = [
-    1e-5, 3e-5, 1e-4, 3e-4, 1e-3, 3e-3, 1e-2, 3e-2, 0.1, 0.3, 1.0, 3.0,
-    10, 30, 100, 300, 1000, 3000, 10000, 30000, 100000, 300000, 1000000,
-    3000000, 10000000,
+    1e-4, 1e-3, 1e-2, 0.1, 1.0, 10, 100, 1000, 10000, 100000, 1000000,
 ]
 SEEDS = [0, 1, 2]
 
