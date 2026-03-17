@@ -284,3 +284,120 @@ def main(test: str = "all", batch_size: int = 12):
     elapsed = time.time() - start
     print(f"\nDone: {completed} ok, {failed} failed in {elapsed/60:.1f}m")
     print(f"Results: {output_dir}/")
+
+    # Print full summary for analysis
+    print_summary(output_dir, script_dir / 'runs_fixed')
+
+
+def print_summary(ablation_dir: Path, baseline_dir: Path):
+    """Print structured summary of all results for LLM analysis."""
+    import numpy as np
+
+    def load_grouped(directory, test_filter=None):
+        """Load JSONs, group by (test, h, alpha) -> list of test_errs."""
+        grouped = defaultdict(list)
+        for f in directory.glob('*.json'):
+            try:
+                with open(f) as fh:
+                    d = json.load(fh)
+            except Exception:
+                continue
+            err = d.get('final_test_err')
+            if err is None or err > 0.5:
+                continue
+            name = d.get('test', 'baseline')
+            if test_filter and name != test_filter:
+                continue
+            grouped[(name, d['h'], d['alpha'])].append(err)
+        return grouped
+
+    # Load baseline from runs_fixed/
+    baseline = load_grouped(baseline_dir) if baseline_dir.exists() else {}
+    # Load ablations
+    ablations = load_grouped(ablation_dir)
+
+    # Build lookup for baseline: (h, alpha) -> mean test_err
+    baseline_lookup = {}
+    for (name, h, alpha), errs in baseline.items():
+        baseline_lookup[(h, alpha)] = np.mean(errs)
+
+    summary_lines = []
+    s = summary_lines.append
+
+    s("=" * 80)
+    s("ABLATION RESULTS SUMMARY")
+    s("=" * 80)
+    s("")
+    s("Context: This codebase studies the lazy-to-feature training transition in")
+    s("neural networks. The key claim is that the regime boundary scales as")
+    s("α* = O(h^{-1/2}), where α is a scaling parameter and h is network width.")
+    s("The baseline uses tau=0 (pure gradient flow), Swish activation, Fashion-MNIST.")
+    s("")
+    s("Each ablation changes ONE thing from the baseline. We report test error")
+    s("at convergence for each (h, alpha_code) pair. 'delta' is the difference")
+    s("from the baseline at the same (h, alpha_code).")
+    s("")
+
+    # Group ablations by test name
+    by_test = defaultdict(list)
+    for (name, h, alpha), errs in ablations.items():
+        by_test[name].append((h, alpha, errs))
+
+    for test_name in ['extra_seed', 'relu', 'mnist']:
+        if test_name not in by_test:
+            continue
+
+        desc = TESTS[test_name]['desc'] if test_name in TESTS else ''
+        rows = by_test[test_name]
+
+        s("-" * 80)
+        s(f"TEST: {test_name}")
+        s(f"  {desc}")
+        s(f"  Overrides: {TESTS.get(test_name, {}).get('overrides', {}) or 'none'}")
+        s(f"  Runs: {sum(len(e) for _, _, e in rows)}")
+        s("")
+        s(f"  {'h':>6} {'alpha_code':>12} {'test_err':>10} {'±std':>8} {'baseline':>10} {'delta':>8} {'n':>4}")
+
+        for h, alpha, errs in sorted(rows, key=lambda r: (r[0], r[1])):
+            mean = np.mean(errs)
+            std = np.std(errs)
+            bl = baseline_lookup.get((h, alpha))
+            bl_str = f"{bl:.4f}" if bl is not None else "    n/a"
+            delta_str = f"{mean - bl:+.4f}" if bl is not None else "    n/a"
+            s(f"  {h:>6} {alpha:>12.2e} {mean:>10.4f} {std:>8.4f} {bl_str:>10} {delta_str:>8} {len(errs):>4}")
+
+        s("")
+
+    # Baseline reference
+    if baseline:
+        s("-" * 80)
+        s("BASELINE REFERENCE (tau=0, Swish, Fashion-MNIST)")
+        s("")
+        s(f"  {'h':>6} {'alpha_code':>12} {'test_err':>10} {'±std':>8} {'n':>4}")
+
+        baseline_rows = [(h, alpha, errs) for (name, h, alpha), errs in baseline.items()]
+        for h, alpha, errs in sorted(baseline_rows, key=lambda r: (r[0], r[1])):
+            mean = np.mean(errs)
+            std = np.std(errs)
+            s(f"  {h:>6} {alpha:>12.2e} {mean:>10.4f} {std:>8.4f} {len(errs):>4}")
+
+        s("")
+
+    s("=" * 80)
+    s("KEY QUESTIONS FOR REVIEW:")
+    s("  1. Does extra_seed land within ±std of the baseline? (variance check)")
+    s("  2. Does relu show the same transition shape? (activation robustness)")
+    s("  3. Does mnist show the same transition shape? (dataset robustness)")
+    s("  4. Do any deltas exceed 0.005? (potential concern)")
+    s("  5. Is the qualitative pattern preserved: lower error at small alpha,")
+    s("     peak near alpha_code~1, lower error at large alpha?")
+    s("=" * 80)
+
+    output = "\n".join(summary_lines)
+    print(output)
+
+    # Also save to file
+    summary_file = ablation_dir / 'summary.txt'
+    with open(summary_file, 'w') as f:
+        f.write(output + "\n")
+    print(f"\nSaved to {summary_file}")

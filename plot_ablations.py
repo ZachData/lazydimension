@@ -106,18 +106,77 @@ def main():
     plt.savefig(out, dpi=200, bbox_inches='tight')
     print(f"Saved {out}")
 
-    # Numerical table
+    # Build baseline lookup
+    baseline_lookup = {}
+    if baseline_grouped:
+        for h in baseline_grouped:
+            for a in baseline_grouped[h]:
+                baseline_lookup[(h, a)] = np.mean(baseline_grouped[h][a])
+
+    # Structured summary
+    lines = []
+    s = lines.append
+
+    s("=" * 80)
+    s("ABLATION RESULTS SUMMARY")
+    s("=" * 80)
+    s("")
+    s("Context: This codebase studies the lazy-to-feature training transition in")
+    s("neural networks. The key claim is that the regime boundary scales as")
+    s("α* = O(h^{-1/2}), where α is a scaling parameter and h is network width.")
+    s("The baseline uses tau=0 (pure gradient flow), Swish activation, Fashion-MNIST.")
+    s("")
+    s("Each ablation changes ONE thing from the baseline. 'delta' is the difference")
+    s("from the baseline at the same (h, alpha_code).")
+    s("")
+
     for name in test_names:
-        runs = ablations[name]
-        grouped = group(runs)
-        print(f"\n{'='*50}")
-        print(f"{name} ({len(runs)} runs)")
-        print(f"{'='*50}")
-        print(f"{'h':>6} {'alpha':>12} {'test_err':>10} {'n':>4}")
-        for h in sorted(grouped):
-            for a in sorted(grouped[h]):
-                vals = grouped[h][a]
-                print(f"{h:>6} {a:>12.2e} {np.mean(vals):>10.4f} {len(vals):>4}")
+        g = group(ablations[name])
+        n_runs = len(ablations[name])
+        s("-" * 80)
+        s(f"TEST: {name} ({n_runs} runs)")
+        s("")
+        s(f"  {'h':>6} {'alpha_code':>12} {'test_err':>10} {'±std':>8} {'baseline':>10} {'delta':>8} {'n':>4}")
+
+        for h in sorted(g):
+            for a in sorted(g[h]):
+                vals = g[h][a]
+                mean = np.mean(vals)
+                std = np.std(vals)
+                bl = baseline_lookup.get((h, a))
+                bl_str = f"{bl:.4f}" if bl is not None else "    n/a"
+                delta_str = f"{mean - bl:+.4f}" if bl is not None else "    n/a"
+                s(f"  {h:>6} {a:>12.2e} {mean:>10.4f} {std:>8.4f} {bl_str:>10} {delta_str:>8} {len(vals):>4}")
+        s("")
+
+    if baseline_grouped:
+        s("-" * 80)
+        s("BASELINE REFERENCE (tau=0, Swish, Fashion-MNIST)")
+        s("")
+        s(f"  {'h':>6} {'alpha_code':>12} {'test_err':>10} {'±std':>8} {'n':>4}")
+        for h in sorted(baseline_grouped):
+            for a in sorted(baseline_grouped[h]):
+                vals = baseline_grouped[h][a]
+                s(f"  {h:>6} {a:>12.2e} {np.mean(vals):>10.4f} {np.std(vals):>8.4f} {len(vals):>4}")
+        s("")
+
+    s("=" * 80)
+    s("KEY QUESTIONS FOR REVIEW:")
+    s("  1. Does extra_seed land within ±std of the baseline? (variance check)")
+    s("  2. Does relu show the same transition shape? (activation robustness)")
+    s("  3. Does mnist show the same transition shape? (dataset robustness)")
+    s("  4. Do any deltas exceed 0.005? (potential concern)")
+    s("  5. Is the qualitative pattern preserved: lower error at small alpha,")
+    s("     peak near alpha_code~1, lower error at large alpha?")
+    s("=" * 80)
+
+    output = "\n".join(lines)
+    print(output)
+
+    summary_file = Path(args.ablation_dir) / 'summary.txt'
+    with open(summary_file, 'w') as f:
+        f.write(output + "\n")
+    print(f"\nSaved to {summary_file}")
 
 
 if __name__ == '__main__':
